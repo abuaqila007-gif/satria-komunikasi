@@ -89,13 +89,68 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function renderChannels(){const sel=$('channelSelect');sel.innerHTML='';channels.forEach(c=>{let o=document.createElement('option');o.value=c.name;o.textContent=c.name;sel.appendChild(o)});sel.value=activeChannel;$('channelList').innerHTML=channels.map(c=>`<button class="channel ${c.name===activeChannel?'selected':''}" data-channel="${esc(c.name)}"><span class="channel-icon">${c.name==='Komando SATRIA'?'✚':'◈'}</span><span><strong>${esc(c.name)}</strong><small>${esc(c.description||'Channel komunitas')}</small></span><span class="count">${c.count||0}</span></button>`).join('');document.querySelectorAll('[data-channel]').forEach(b=>b.onclick=async()=>{const next=b.dataset.channel;if(next===activeChannel)return;activeChannel=next;await leaveLiveKitRoom();renderChannels();setPttStatus('SIAP · '+activeChannel,'Pilih channel yang sama dengan anggota lain, lalu tahan tombol untuk berbicara.')})}
 function renderMembers(){let q=$('memberSearch').value.toLowerCase();let list=members.filter(m=>(m.nickname||'').toLowerCase().includes(q)||(m.area||'').toLowerCase().includes(q));$('memberList').innerHTML=list.length?list.map((m,i)=>`<div class="member"><div class="avatar">${esc((m.nickname||'?').slice(0,1).toUpperCase())}</div><div style="flex:1"><strong>${esc(m.nickname||'Anggota SATRIA')}</strong><div class="online">● Terdaftar di aplikasi${m.area?' · '+esc(m.area):''}</div></div><span class="muted">${m.share_location?'📍':'⋯'}</span></div>`).join(''):'<div class="empty">Belum ada anggota yang cocok.</div>'}
 function renderReports(){$('sosList').innerHTML=reports.length?reports.slice(0,20).map(r=>`<div class="report"><div class="avatar" style="background:#9f111c">!</div><div style="flex:1"><strong>${esc(r.nickname||'Anggota SATRIA')}</strong><div class="muted">${esc(r.message||'Meminta bantuan')} · ${r.created_at?new Date(r.created_at).toLocaleString('id-ID'):''}</div></div><span class="tag">${esc(r.status||'SOS')}</span></div>`).join(''):'<div class="empty">Belum ada laporan SOS.</div>'}
-async function setup(){try{if(!window.supabase)return;db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);let {data,error}=await db.auth.getSession();if(error)throw error;user=data.session?.user||null;if(!user){let r=await db.auth.signInAnonymously();if(r.error)throw r.error;user=r.data.user} $('conn').textContent='● TERHUBUNG';$('conn').style.color='#39dfa1';await ensureMember();await loadAll();db.channel('satria-live-channels').on('postgres_changes',{event:'*',schema:'public',table:'satria_channels'},loadChannels).subscribe();db.channel('satria-live-members').on('postgres_changes',{event:'*',schema:'public',table:'satria_members'},loadMembers).subscribe();db.channel('satria-live-sos').on('postgres_changes',{event:'*',schema:'public',table:'satria_sos_reports'},loadReports).subscribe()}catch(e){$('conn').textContent='● OFFLINE/DEMO';console.warn(e);toast('Mode demo: koneksi database belum tersedia. Periksa pengaturan Supabase.')}} 
+
+// Alarm SOS untuk aplikasi yang sedang terbuka. Notifikasi browser memerlukan izin pengguna.
+let sosAudioContext = null;
+let lastSOSAlertAt = 0;
+function playSOSAlarm(){
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!sosAudioContext) sosAudioContext = new AC();
+    if (sosAudioContext.state === 'suspended') sosAudioContext.resume();
+    const ctx = sosAudioContext;
+    [880, 660, 880].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const start = ctx.currentTime + i * 0.28;
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.22, start + 0.025);
+      gain.gain.setValueAtTime(0.22, start + 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(start); osc.stop(start + 0.23);
+    });
+  } catch (e) { console.warn('Alarm SOS tidak dapat diputar:', e); }
+}
+function alertIncomingSOS(row){
+  const now = Date.now();
+  if (now - lastSOSAlertAt < 2500) return;
+  lastSOSAlertAt = now;
+  playSOSAlarm();
+  if (navigator.vibrate) navigator.vibrate([300,120,300,120,600]);
+  toast('🆘 SOS BARU dari ' + (row.nickname || 'Anggota SATRIA') + ' — segera periksa laporan!');
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification('🆘 SOS DARURAT SATRIA', {
+        body: (row.nickname || 'Anggota SATRIA') + ' membutuhkan bantuan. Buka aplikasi untuk melihat laporan.',
+        tag: 'satria-sos-' + (row.id || row.created_at || now),
+        requireInteraction: true
+      });
+    } catch (e) { console.warn('Notifikasi browser gagal:', e); }
+  }
+}
+async function requestSOSNotificationPermission(){
+  if (!('Notification' in window) || Notification.permission !== 'default') return;
+  try { await Notification.requestPermission(); } catch (_) {}
+}
+async function setup(){try{if(!window.supabase)return;db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);let {data,error}=await db.auth.getSession();if(error)throw error;user=data.session?.user||null;if(!user){let r=await db.auth.signInAnonymously();if(r.error)throw r.error;user=r.data.user} $('conn').textContent='● TERHUBUNG';$('conn').style.color='#39dfa1';await ensureMember();await loadAll();db.channel('satria-live-channels').on('postgres_changes',{event:'*',schema:'public',table:'satria_channels'},loadChannels).subscribe();db.channel('satria-live-members').on('postgres_changes',{event:'*',schema:'public',table:'satria_members'},loadMembers).subscribe();db.channel('satria-live-sos')
+ .on('postgres_changes',{event:'INSERT',schema:'public',table:'satria_sos_reports'},payload=>{
+   const row = payload && payload.new ? payload.new : {};
+   // Jangan bunyikan alarm untuk SOS yang dibuat oleh perangkat ini sendiri.
+   if (row.user_id && user && row.user_id === user.id) { loadReports(); return; }
+   loadReports();
+   alertIncomingSOS(row);
+ })
+ .subscribe()}catch(e){$('conn').textContent='● OFFLINE/DEMO';console.warn(e);toast('Mode demo: koneksi database belum tersedia. Periksa pengaturan Supabase.')}} 
 async function ensureMember(){if(!db||!user)return;let r=await db.from('satria_members').select('user_id').eq('user_id',user.id).maybeSingle();if(r.error)throw r.error;if(!r.data){let ins=await db.from('satria_members').insert({user_id:user.id,nickname:nickname||'Terapis SATRIA',area:'',share_location:false});if(ins.error)console.warn(ins.error)}else if(nickname){let up=await db.from('satria_members').update({nickname,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(up.error)console.warn(up.error)}}
 async function loadChannels(){if(!db)return;let r=await db.from('satria_channels').select('*').order('name');if(!r.error&&r.data?.length){channels=r.data.map(c=>({...c,count:0}));if(!channels.some(c=>c.name===activeChannel))activeChannel=channels[0].name;renderChannels()}}
 async function loadMembers(){if(!db)return;let r=await db.from('satria_members').select('user_id,nickname,area,share_location,updated_at').order('nickname');if(!r.error){members=r.data||[];renderMembers()}}
 async function loadReports(){if(!db)return;let r=await db.from('satria_sos_reports').select('*').order('created_at',{ascending:false}).limit(20);if(!r.error){reports=r.data||[];renderReports()}}
 async function loadAll(){await Promise.all([loadChannels(),loadMembers(),loadReports()])}
-$('continueBtn').onclick=async()=>{nickname=$('nickname').value.trim()||'Terapis SATRIA';localStorage.setItem('satria_nickname',nickname);$('welcome').classList.remove('active');showScreen('radio');await setup();toast('Selamat datang, '+nickname)};
+$('continueBtn').onclick=async()=>{nickname=$('nickname').value.trim()||'Terapis SATRIA';localStorage.setItem('satria_nickname',nickname);await requestSOSNotificationPermission();$('welcome').classList.remove('active');showScreen('radio');await setup();toast('Selamat datang, '+nickname)};
 $('nickname').value=nickname;
 document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>{showScreen(b.dataset.screen);if(b.dataset.screen==='map'){initSatriaMap();setTimeout(()=>{if(satriaMap)satriaMap.invalidateSize()},250)}});
 $('channelSelect').onchange=async e=>{const next=e.target.value;if(next===activeChannel)return;activeChannel=next;await leaveLiveKitRoom();renderChannels();setPttStatus('SIAP · '+activeChannel,'Pilih channel yang sama dengan anggota lain, lalu tahan tombol untuk berbicara.')};
