@@ -35,8 +35,8 @@ header{display:flex;align-items:center;gap:10px;padding:16px 2px 13px;border-bot
 <section id="radio" class="screen">
  <div class="section-head"><div><div class="eyebrow">RADIO PTT</div><h2>Channel komunikasi</h2></div><button class="smallbtn" id="newChannelBtn">＋ Channel</button></div>
  <div class="card"><div class="muted">CHANNEL AKTIF</div><select id="channelSelect" class="field" style="margin-bottom:2px"><option>Komando SATRIA</option></select><div id="channelList"></div></div>
- <div class="card ptt-wrap"><div class="muted" id="pttStatus">Siap terhubung ke channel</div><button class="ptt" id="ptt"><span class="mic">🎙</span><small>TEKAN & TAHAN<br>UNTUK BICARA</small></button><p class="muted" id="pttHint">Tekan dan tahan tombol saat berbicara</p></div>
- <div class="card"><strong>Catatan radio</strong><p class="muted">Tampilan PTT tersedia. Audio langsung antarperangkat memerlukan layanan suara/signaling yang dikonfigurasi dan pengujian pada perangkat nyata. Browser dapat menghentikan audio saat layar terkunci.</p></div>
+ <div class="card ptt-wrap"><div class="muted" id="pttStatus">Siap · pilih channel</div><button class="ptt" id="ptt"><span class="mic">🎙</span><small>TEKAN & TAHAN<br>UNTUK BICARA</small></button><p class="muted" id="pttHint">Tekan dan tahan tombol saat berbicara</p></div>
+ <div class="card"><strong>Radio suara LiveKit (uji coba)</strong><p class="muted">Pilih channel yang sama di dua HP. Tekan dan tahan tombol mikrofon untuk berbicara, lalu lepaskan untuk mematikan mikrofon. Izinkan akses mikrofon saat diminta. Sandbox token server hanya untuk pengujian; sebelum dipakai komunitas secara luas, token harus dipindahkan ke endpoint backend yang aman. Browser dapat menghentikan audio saat layar terkunci.</p></div>
 </section>
 
 <section id="sos" class="screen">
@@ -68,6 +68,7 @@ header{display:flex;align-items:center;gap:10px;padding:16px 2px 13px;border-bot
 <div class="toast" id="toast"></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
 <script>
 const SUPABASE_URL='https://qvaemfrxeljzznqebgfz.supabase.co';
 const SUPABASE_KEY='sb_publishable_d-ZkXXcQeMeXYNl1dKBz4w_oaXMTHVM';
@@ -82,7 +83,7 @@ const $=id=>document.getElementById(id);
 function toast(s){$('toast').textContent=s;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',3000)}
 function showScreen(name){document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));$(name).classList.add('active');document.querySelectorAll('.navbtn').forEach(b=>b.classList.toggle('active',b.dataset.screen===name));}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function renderChannels(){const sel=$('channelSelect');sel.innerHTML='';channels.forEach(c=>{let o=document.createElement('option');o.value=c.name;o.textContent=c.name;sel.appendChild(o)});sel.value=activeChannel;$('channelList').innerHTML=channels.map(c=>`<button class="channel ${c.name===activeChannel?'selected':''}" data-channel="${esc(c.name)}"><span class="channel-icon">${c.name==='Komando SATRIA'?'✚':'◈'}</span><span><strong>${esc(c.name)}</strong><small>${esc(c.description||'Channel komunitas')}</small></span><span class="count">${c.count||0}</span></button>`).join('');document.querySelectorAll('[data-channel]').forEach(b=>b.onclick=()=>{activeChannel=b.dataset.channel;renderChannels();$('pttStatus').textContent='Channel aktif: '+activeChannel})}
+function renderChannels(){const sel=$('channelSelect');sel.innerHTML='';channels.forEach(c=>{let o=document.createElement('option');o.value=c.name;o.textContent=c.name;sel.appendChild(o)});sel.value=activeChannel;$('channelList').innerHTML=channels.map(c=>`<button class="channel ${c.name===activeChannel?'selected':''}" data-channel="${esc(c.name)}"><span class="channel-icon">${c.name==='Komando SATRIA'?'✚':'◈'}</span><span><strong>${esc(c.name)}</strong><small>${esc(c.description||'Channel komunitas')}</small></span><span class="count">${c.count||0}</span></button>`).join('');document.querySelectorAll('[data-channel]').forEach(b=>b.onclick=async()=>{const next=b.dataset.channel;if(next===activeChannel)return;activeChannel=next;await leaveLiveKitRoom();renderChannels();setPttStatus('SIAP · '+activeChannel,'Pilih channel yang sama dengan anggota lain, lalu tahan tombol untuk berbicara.')})}
 function renderMembers(){let q=$('memberSearch').value.toLowerCase();let list=members.filter(m=>(m.nickname||'').toLowerCase().includes(q)||(m.area||'').toLowerCase().includes(q));$('memberList').innerHTML=list.length?list.map((m,i)=>`<div class="member"><div class="avatar">${esc((m.nickname||'?').slice(0,1).toUpperCase())}</div><div style="flex:1"><strong>${esc(m.nickname||'Anggota SATRIA')}</strong><div class="online">● Terdaftar di aplikasi${m.area?' · '+esc(m.area):''}</div></div><span class="muted">${m.share_location?'📍':'⋯'}</span></div>`).join(''):'<div class="empty">Belum ada anggota yang cocok.</div>'}
 function renderReports(){$('sosList').innerHTML=reports.length?reports.slice(0,20).map(r=>`<div class="report"><div class="avatar" style="background:#9f111c">!</div><div style="flex:1"><strong>${esc(r.nickname||'Anggota SATRIA')}</strong><div class="muted">${esc(r.message||'Meminta bantuan')} · ${r.created_at?new Date(r.created_at).toLocaleString('id-ID'):''}</div></div><span class="tag">${esc(r.status||'SOS')}</span></div>`).join(''):'<div class="empty">Belum ada laporan SOS.</div>'}
 async function setup(){try{if(!window.supabase)return;db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);let {data,error}=await db.auth.getSession();if(error)throw error;user=data.session?.user||null;if(!user){let r=await db.auth.signInAnonymously();if(r.error)throw r.error;user=r.data.user} $('conn').textContent='● TERHUBUNG';$('conn').style.color='#39dfa1';await ensureMember();await loadAll();db.channel('satria-live-channels').on('postgres_changes',{event:'*',schema:'public',table:'satria_channels'},loadChannels).subscribe();db.channel('satria-live-members').on('postgres_changes',{event:'*',schema:'public',table:'satria_members'},loadMembers).subscribe();db.channel('satria-live-sos').on('postgres_changes',{event:'*',schema:'public',table:'satria_sos_reports'},loadReports).subscribe()}catch(e){$('conn').textContent='● OFFLINE/DEMO';console.warn(e);toast('Mode demo: koneksi database belum tersedia. Periksa pengaturan Supabase.')}} 
@@ -94,9 +95,116 @@ async function loadAll(){await Promise.all([loadChannels(),loadMembers(),loadRep
 $('continueBtn').onclick=async()=>{nickname=$('nickname').value.trim()||'Terapis SATRIA';localStorage.setItem('satria_nickname',nickname);$('welcome').classList.remove('active');showScreen('radio');await setup();toast('Selamat datang, '+nickname)};
 $('nickname').value=nickname;
 document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>showScreen(b.dataset.screen));
-$('channelSelect').onchange=e=>{activeChannel=e.target.value;renderChannels();$('pttStatus').textContent='Channel aktif: '+activeChannel};
+$('channelSelect').onchange=async e=>{const next=e.target.value;if(next===activeChannel)return;activeChannel=next;await leaveLiveKitRoom();renderChannels();setPttStatus('SIAP · '+activeChannel,'Pilih channel yang sama dengan anggota lain, lalu tahan tombol untuk berbicara.')};
 $('newChannelBtn').onclick=async()=>{let name=prompt('Nama channel baru:');if(!name||!name.trim())return;name=name.trim();if(channels.some(c=>c.name.toLowerCase()===name.toLowerCase())){toast('Nama channel sudah ada');return}if(db&&user){let r=await db.from('satria_channels').insert({name,description:'Channel komunitas SATRIA',channel_type:'radio',created_by:user.id});if(r.error){toast('Gagal membuat channel: '+r.error.message);return}}channels.push({name,description:'Channel komunitas SATRIA',count:0});activeChannel=name;renderChannels();toast('Channel dibuat: '+name)};
-let pttHeld=false;const ptt=$('ptt');function pttStart(e){e.preventDefault();pttHeld=true;ptt.classList.add('pressed');$('pttStatus').textContent='TOMBOL DITEKAN · '+activeChannel;$('pttHint').textContent='Mode tampilan PTT — audio langsung belum dikonfigurasi';if(navigator.vibrate)navigator.vibrate(35)}function pttEnd(){if(!pttHeld)return;pttHeld=false;ptt.classList.remove('pressed');$('pttStatus').textContent='Siap terhubung ke channel';$('pttHint').textContent='Lepaskan tombol untuk berhenti bicara'}ptt.addEventListener('pointerdown',pttStart);['pointerup','pointercancel','pointerleave'].forEach(ev=>ptt.addEventListener(ev,pttEnd));
+// LiveKit PTT audio — development sandbox only. Replace with a secure token endpoint before production.
+const LIVEKIT_SANDBOX_ID = 'satriakomunikasi-1eokrr';
+let liveRoom = null, liveRoomName = '', pttHeld = false, pttStarting = false;
+const ptt = $('ptt');
+function roomNameForChannel(name){
+  const slug = String(name || 'umum').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,48) || 'umum';
+  return 'satria-' + slug;
+}
+function setPttStatus(status, hint){
+  $('pttStatus').textContent = status;
+  $('pttHint').textContent = hint;
+}
+async function ensureLiveKitRoom(){
+  if (!window.LivekitClient) throw new Error('Library audio LiveKit belum termuat. Periksa koneksi internet lalu muat ulang halaman.');
+  const desiredRoom = roomNameForChannel(activeChannel);
+  if (liveRoom && liveRoomName === desiredRoom && liveRoom.state === 'connected') return liveRoom;
+  if (liveRoom) {
+    try { await liveRoom.localParticipant.setMicrophoneEnabled(false); } catch(_){}
+    try { await liveRoom.disconnect(); } catch(_){}
+    liveRoom = null;
+    liveRoomName = '';
+  }
+  setPttStatus('MENGHUBUNGKAN AUDIO…', 'Mohon tunggu dan izinkan akses mikrofon jika diminta.');
+  const tokenSource = LivekitClient.TokenSource.sandboxTokenServer(LIVEKIT_SANDBOX_ID);
+  const identity = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('satria-' + Date.now() + '-' + Math.random().toString(36).slice(2,8));
+  const details = await tokenSource.fetch({
+    roomName: desiredRoom,
+    participantName: (nickname || 'Anggota SATRIA').slice(0,80),
+    participantIdentity: identity
+  });
+  const room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
+  room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    if (track.kind === LivekitClient.Track.Kind.Audio) {
+      const audioEl = track.attach();
+      audioEl.autoplay = true;
+      audioEl.playsInline = true;
+      audioEl.setAttribute('data-satria-audio', participant.identity || 'remote');
+      document.body.appendChild(audioEl);
+      audioEl.play().catch(()=>toast('Sentuh layar sekali agar audio anggota lain dapat diputar.'));
+    }
+  });
+  room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
+    track.detach().forEach(el => el.remove());
+  });
+  await room.connect(details.serverUrl, details.participantToken);
+  liveRoom = room;
+  liveRoomName = desiredRoom;
+  return liveRoom;
+}
+async function leaveLiveKitRoom(){
+  if (liveRoom) {
+    try { await liveRoom.localParticipant.setMicrophoneEnabled(false); } catch(_){}
+    try { await liveRoom.disconnect(); } catch(_){}
+  }
+  document.querySelectorAll('[data-satria-audio]').forEach(el=>el.remove());
+  liveRoom = null;
+  liveRoomName = '';
+}
+async function pttStart(e){
+  if (e) e.preventDefault();
+  if (pttHeld || pttStarting) return;
+  pttHeld = true;
+  pttStarting = true;
+  ptt.classList.add('pressed');
+  if (navigator.vibrate) navigator.vibrate(35);
+  setPttStatus('MENYIAPKAN MIKROFON…', 'Tetap tahan tombol. Audio akan aktif setelah tersambung.');
+  try {
+    const room = await ensureLiveKitRoom();
+    if (!pttHeld) {
+      await room.localParticipant.setMicrophoneEnabled(false);
+      setPttStatus('SIAP · ' + activeChannel, 'Tekan dan tahan tombol untuk berbicara.');
+      return;
+    }
+    await room.localParticipant.setMicrophoneEnabled(true);
+    if (!pttHeld) await room.localParticipant.setMicrophoneEnabled(false);
+    setPttStatus(pttHeld ? '🔴 SEDANG BERBICARA · ' + activeChannel : 'TERHUBUNG · ' + activeChannel,
+      pttHeld ? 'Suara dikirim ke anggota di channel yang sama. Lepaskan untuk berhenti.' : 'Mikrofon nonaktif.');
+  } catch(err) {
+    console.error('LiveKit PTT error:', err);
+    pttHeld = false;
+    ptt.classList.remove('pressed');
+    setPttStatus('AUDIO BELUM TERHUBUNG', 'Periksa token server, internet, dan izin mikrofon.');
+    toast('Gagal mengaktifkan audio: ' + (err && err.message ? err.message : 'periksa pengaturan LiveKit'));
+  } finally {
+    pttStarting = false;
+  }
+}
+async function pttEnd(){
+  if (!pttHeld) return;
+  pttHeld = false;
+  ptt.classList.remove('pressed');
+  try {
+    if (liveRoom && liveRoom.state === 'connected') {
+      await liveRoom.localParticipant.setMicrophoneEnabled(false);
+      setPttStatus('TERHUBUNG · ' + activeChannel, 'Mikrofon mati. Tekan dan tahan untuk berbicara lagi.');
+    } else {
+      setPttStatus('SIAP · ' + activeChannel, 'Tekan dan tahan tombol untuk berbicara.');
+    }
+  } catch(err) {
+    console.warn('Tidak dapat mematikan mikrofon:', err);
+    setPttStatus('PERIKSA MIKROFON', 'Lepas dan tekan kembali tombol PTT.');
+  }
+}
+ptt.addEventListener('pointerdown', pttStart);
+['pointerup','pointercancel','pointerleave'].forEach(ev=>ptt.addEventListener(ev,pttEnd));
+window.addEventListener('blur', pttEnd);
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) pttEnd(); });
 $('sendSOS').onclick=async()=>{if(!confirm('Kirim SOS darurat ke komunitas SATRIA? Gunakan hanya untuk keadaan yang benar-benar membutuhkan bantuan.'))return;let payload={user_id:user?.id||null,nickname:nickname||'Anggota SATRIA',message:'Memerlukan bantuan darurat',status:'SOS'};if(sharing&&navigator.geolocation){try{let pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:8000}));payload.latitude=pos.coords.latitude;payload.longitude=pos.coords.longitude}catch(e){toast('Lokasi tidak berhasil diambil; laporan tanpa lokasi.')}}if(db&&user){let r=await db.from('satria_sos_reports').insert(payload);if(r.error){toast('SOS belum terkirim ke server: '+r.error.message);return}}reports.unshift({...payload,created_at:new Date().toISOString()});renderReports();toast(db?'Laporan SOS dikirim.':'Mode demo: laporan hanya tampil di perangkat ini.');showScreen('sos')};
 $('locationToggle').onclick=async()=>{if(!sharing){if(!navigator.geolocation){toast('Perangkat tidak mendukung lokasi');return}try{let pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:10000}));sharing=true;$('locationToggle').classList.add('on');$('locationStatus').textContent='Lokasi aktif. Memperbarui posisi perangkat.';let save=async(p)=>{if(!db||!user)return;let r=await db.from('satria_locations').upsert({user_id:user.id,latitude:p.coords.latitude,longitude:p.coords.longitude,updated_at:new Date().toISOString()},{onConflict:'user_id'});if(r.error)console.warn(r.error);let m=await db.from('satria_members').update({share_location:true,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(m.error)console.warn(m.error)};await save(pos);watchId=navigator.geolocation.watchPosition(save,()=>{}, {enableHighAccuracy:true,maximumAge:15000});toast('Berbagi lokasi diaktifkan')}catch(e){toast('Izin lokasi ditolak atau lokasi tidak tersedia')}}else{sharing=false;$('locationToggle').classList.remove('on');$('locationStatus').textContent='Berbagi lokasi nonaktif.';if(watchId!==null)navigator.geolocation.clearWatch(watchId);watchId=null;if(db&&user){let r=await db.from('satria_members').update({share_location:false,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error)console.warn(r.error)}toast('Berbagi lokasi dihentikan')}};
 $('refreshMembers').onclick=loadMembers;$('refreshSOS').onclick=loadReports;$('memberSearch').oninput=renderMembers;
